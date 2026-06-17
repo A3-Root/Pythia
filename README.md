@@ -27,7 +27,8 @@ This will return this to your SQF code:
 
     ["awesome", 42, True, [1, 3.5]]
 
-See the [examples directory](examples/) for example mods performing simple functions.
+See the [examples directory](examples/) for example mods performing simple functions, and **[USAGE.md](USAGE.md)** for
+the full guide (SQF API, writing Python bridges, type conversion, threads, dependencies and troubleshooting).
 
 What Pythia does NOT do:
 ------------------------
@@ -250,10 +251,23 @@ Installing
 - Build the mod yourself
 - Copy `@Pythia` to `Arma 3` directory
 
+#### Python requirement
+
+Pythia no longer bundles its own interpreter — it uses the **system Python**. Install the Python version Pythia was
+built against (see `PYTHON_VERSION` in `.github/workflows/build.yml`) before running the game. On Windows the matching
+`<major>.<minor>` build must be installed (it is found via the registry or `PATH`); set `PYTHIA_PYTHON_HOME` to point at
+a specific install if needed. On Linux install the distro's `python3.<minor>` package.
+
+#### Pointing Pythia at extra module locations
+
+Beyond modules discovered in loaded Arma mods, you can list additional directories (each containing a `$PYTHIA$` marker)
+in the `PYTHIA_PATH` environment variable (`;`-separated on Windows, `:`-separated on Linux). Call
+`"Pythia" callExtension "[""pythia.rescan"", []]"` to re-scan for modules at runtime.
+
 #### Installing Python requirements
 
-If any of your Pythia mods contains a `requirements.txt` file, simply drag it onto `@Pythia\install_requirements64.bat`
-to install all the requirements to both python installations before running the game.
+If any of your Pythia mods contains a `requirements.txt` file, install it into your system Python (e.g.
+`python -m pip install -r requirements.txt`) before running the game.
 
 Pythia development
 ==================
@@ -265,33 +279,44 @@ instead.
 Building requirements
 ---------------------
 
+- The target Python (`<major>.<minor>` from `PYTHON_VERSION` in `.github/workflows/build.yml`) **with development
+  headers** — this is what the binaries link against
 - uv
-- Visual Studio Community 2022
-- WSL2 with clang and Docker installed and configured
-- MakePBO
+- Visual Studio Community 2022 (Windows)
+- CMake + Ninja
+- A C++17 compiler (gcc/clang on Linux)
+- Mikero's DePboTools (`makepbo`, for building/signing the addon PBOs)
+
+No Docker, WSL2, or bundled interpreters are needed — builds are native and link the system Python.
 
 Building
 --------
 
-#### First-time build:
+#### One-shot build (recommended)
 
-Run this on Windows (requires WSL2 and Docker to be installed and configured!)
+Produces a ready-to-deploy `@Pythia` folder (binaries + addon PBOs + templates).
+
+- **Windows:** `build.bat` — x64 binaries and signed PBOs. Add `x86` to also
+  build 32-bit, or `nopbo` to skip PBOs.
+- **Linux:** `./build.sh` — x64 `.so`.
+
+The PBOs are platform-independent, so a full cross-platform release is the Windows
+binaries + the Linux `.so` + one shared set of PBOs. Copy the resulting `@Pythia`
+into your Arma 3 directory (and install the matching Python — see `USAGE.md`).
+
+#### Full CI-parity build:
 
     powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-    # Setup uv on WSL
-    wsl /bin/bash -ic "curl -LsSf https://astral.sh/uv/install.sh | sh"
-
     uv run tools\rebuild_all.py
 
-This will fetch and install all the python interpreters required both for
-building Pythia and then used by Pythia itself at runtime. See `build.py` which
-is used by `rebuild_all.py` for details.
+See `build.py` (driven by `rebuild_all.py`) for the individual steps.
 
 #### Later, for modifying and building the DLLs/SOs:
 
 - In Visual Studio: File -> Open -> CMake: `CmakeLists.txt`, Build -> Build All. Remember to build for all
   configurations!
+- On Linux: `cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo ..` then `ninja` (needs `python3.<minor>-dev`).
 
 #### Later, for building everything else:
 
@@ -301,18 +326,15 @@ is used by `rebuild_all.py` for details.
 Common errors
 -------------
 
-#### Got permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock
+#### CMake can't find Python / `Could NOT find Python3 (Development)`
 
-Your Docker environment is misconfigured. You probably need to add yourself to the `docker` group and restart the
-shell.
+The target `<major>.<minor>` Python with development headers isn't installed (or isn't on `PATH`). Install it (on Linux
+the `python3.<minor>-dev` package) and reconfigure.
 
-    sudo usermod -aG docker $USER
+#### Pythia fails to load in-game / `python3X.dll` not found
 
-#### FileExistsError: [Errno 17] File exists: '@Pythia/python-310-embed-linux32'
-
-Docker/WSL2 is probably throwing a fit. Restart WSL by typing this command.
-
-    wsl --shutdown
+The matching system Python isn't installed or isn't discoverable. Install it, or set `PYTHIA_PYTHON_HOME` to its
+directory. See `PythiaSetPythonPath.log` / `pythia.log` for the path Pythia resolved.
 
 Contributing
 ------------

@@ -69,45 +69,34 @@ namespace
     };
 }
 
-std::wstring joinPaths(std::vector<std::wstring> const paths)
-{
-    std::wstring out;
-    bool firstTime = true;
-    for(const auto& path : paths)
-    {
-        if(firstTime)
-        {
-            firstTime = false;
-            out += path;
-        }
-        else
-        {
-            #ifdef _WIN32
-                out += L";";
-            #else
-                out += L":";
-            #endif
-            out += path;
-        }
-    }
-    return out;
-}
-
 void EmbeddedPython::libpythonWorkaround()
 {
     #ifndef _WIN32
-        // https://stackoverflow.com/a/60746446/6543759
-        // https://docs.python.org/3/whatsnew/3.8.html#changes-in-the-c-api
-        // undefined symbol: PyExc_ImportError
-        // Manually load libpythonX.Y.so with dlopen(RTLD_GLOBAL) to allow numpy to access python symbols
-        // and in Python 3.8+ any C extension
-        const char* pythonLibraryName = "libpython" PYTHON_VERSION_DOTTED ".so.1.0";
+        // Re-expose libpython's symbols globally so C/Cython extension modules
+        // (e.g. numpy) can resolve them. Since Python 3.8 the interpreter no
+        // longer loads libpython with RTLD_GLOBAL by default, which breaks such
+        // extensions with errors like "undefined symbol: PyExc_ImportError".
+        // The ABI is tied to the version Pythia was built against, so only the
+        // matching libpython is probed (versioned name first, then the linker
+        // name, then the stable-ABI loader).
+        // Refs: https://docs.python.org/3/whatsnew/3.8.html#changes-in-the-c-api
+        const char* candidates[] = {
+            "libpython" PYTHON_VERSION_DOTTED ".so.1.0",
+            "libpython" PYTHON_VERSION_DOTTED ".so",
+            "libpython3.so",
+        };
 
-        libpythonHandle = dlopen(pythonLibraryName, RTLD_LAZY | RTLD_GLOBAL);
-        if (!libpythonHandle)
+        for (const char* name : candidates)
         {
-            LOG_INFO(std::string("Could not load ") + pythonLibraryName);
+            libpythonHandle = dlopen(name, RTLD_LAZY | RTLD_GLOBAL);
+            if (libpythonHandle)
+            {
+                LOG_INFO(std::string("Loaded ") + name + " with RTLD_GLOBAL");
+                return;
+            }
         }
+
+        LOG_INFO("Could not preload any libpython variant for global symbols");
     #endif // ifndef _WIN32
 }
 
@@ -122,43 +111,6 @@ void EmbeddedPython::libpythonWorkaroundClose()
     #endif // ifndef _WIN32
 }
 
-std::vector<std::wstring> computePythonPaths(const std::wstring& wpath)
-{
-/*
-
-# Obtain the current paths by running the embedded python binary
-import sys
-base_dir = sys.executable.split('/bin/')[0]
-for path in sys.path:
-    print(path.replace(base_dir, ''))
-
-*/
-    #ifdef _WIN32
-        std::vector<std::wstring> allPaths({
-            wpath + L"\\python" PYTHON_VERSION + L".zip",
-            wpath + L"\\DLLs",
-            wpath + L"\\lib",
-            wpath,
-            wpath + L"\\Lib\\site-packages",
-#           ifdef ADAPTER_DEVELOPMENT
-                getProgramDirectory(),
-#           endif
-        });
-    #else
-        std::vector<std::wstring> allPaths({
-            wpath + L"/lib/python" PYTHON_VERSION + L".zip",
-            wpath + L"/lib/python" PYTHON_VERSION_DOTTED,
-            wpath + L"/lib/python" PYTHON_VERSION_DOTTED L"/lib-dynload",
-            wpath + L"/lib/python" PYTHON_VERSION_DOTTED L"/site-packages",
-#           ifdef ADAPTER_DEVELOPMENT
-                Logger::s2w(getProgramDirectory()),
-#           endif
-        });
-    #endif
-
-    return allPaths;
-}
-
 std::wstring ensureWideChar(tstring str)
 {
     #ifdef _WIN32
@@ -168,60 +120,49 @@ std::wstring ensureWideChar(tstring str)
     #endif
 }
 
-std::wstring computeProgramNameString(std::wstring wpath)
-{
-    #ifdef _WIN32
-        return wpath + L"\\python.exe";
-    #else
-        return wpath + L"/bin/python3";
-    #endif
-}
-
 EmbeddedPython::EmbeddedPython()
 {
     LOG_INFO("################################################################################");
     LOG_INFO(std::string("Pythia version: ") + PYTHIA_VERSION);
     LOG_INFO(std::string("Python version: ") + Py_GetVersion());
 
-    auto pythonPath = ensureWideChar(getPythonPath());
-    auto programPath = computeProgramNameString(pythonPath);
-    auto pathsVector = computePythonPaths(pythonPath);
+    // Point the interpreter at the system Python install discovered on disk and
+    // let CPython derive sys.path / prefixes from that interpreter's real
+    // location. No interpreter is bundled with Pythia anymore.
+    auto executable = ensureWideChar(discoverPythonExecutable());
+    if (executable.empty())
+    {
+        LOG_INFO("No system Python executable found; falling back to default path computation");
+    }
+    else
+    {
+        LOG_INFO(std::string("System Python executable: ") + Logger::w2s(executable));
+    }
 
-    // Preconfig
+    // Preconfig. The Python (non-isolated) config honors PYTHON* environment
+    // variables and the system locale, matching a normal `python` invocation.
     PyPreConfig preconfig;
-    PyPreConfig_InitIsolatedConfig(&preconfig);
-
+    PyPreConfig_InitPythonConfig(&preconfig);
     preconfig.utf8_mode = 1;
 
     PyStatus status = Py_PreInitialize(&preconfig);
-
     if (PyStatus_Exception(status))
     {
         THROW_PYINITIALIZE_EXCEPTION(std::string("Preinitialization exception: ") + status.err_msg)
     }
 
-    // Config
     PyConfig config;
-    PyConfig_InitIsolatedConfig(&config);
-
+    PyConfig_InitPythonConfig(&config);
     config.site_import = 1;
-    status = PyConfig_SetString(&config, &config.base_exec_prefix, pythonPath.c_str());
-    status = PyConfig_SetString(&config, &config.base_executable, programPath.c_str());
-    status = PyConfig_SetString(&config, &config.base_prefix, pythonPath.c_str());
-    status = PyConfig_SetString(&config, &config.exec_prefix, pythonPath.c_str());
-    status = PyConfig_SetString(&config, &config.executable, programPath.c_str());
-    status = PyConfig_SetString(&config, &config.prefix, pythonPath.c_str());
-    status = PyConfig_SetString(&config, &config.home, pythonPath.c_str());
 
-    for (auto& path : pathsVector)
+    if (!executable.empty())
     {
-        status = PyWideStringList_Append(&config.module_search_paths, path.c_str());
-    }
-    config.module_search_paths_set = 1;
-
-    if (PyStatus_Exception(status))
-    {
-        THROW_PYINITIALIZE_EXCEPTION(std::string("Initialization exception: ") + status.err_msg)
+        status = PyConfig_SetString(&config, &config.program_name, executable.c_str());
+        if (PyStatus_Exception(status))
+        {
+            PyConfig_Clear(&config);
+            THROW_PYINITIALIZE_EXCEPTION(std::string("Failed to set program name: ") + status.err_msg)
+        }
     }
 
     // Add custom modules
@@ -238,10 +179,30 @@ EmbeddedPython::EmbeddedPython()
         THROW_PYINITIALIZE_EXCEPTION(std::string("Py_InitializeFromConfig exception: ") + status.err_msg)
     }
 
-    LOG_INFO(std::string("Python executable from C++: ") + Logger::w2s(Py_GetProgramFullPath()));
-    LOG_INFO(std::string("Python home: ") + Logger::w2s(Py_GetPythonHome()));
-    LOG_INFO(std::string("Program name: ") + Logger::w2s(Py_GetProgramName()));
-    LOG_INFO(std::string("Python paths: ") + Logger::w2s(Py_GetPath()));
+    // These may be NULL when not explicitly configured (e.g. home is derived,
+    // not set), so guard before constructing a std::wstring from them.
+    auto logW = [](const wchar_t* value) {
+        return value ? Logger::w2s(value) : std::string("(none)");
+    };
+    LOG_INFO(std::string("Python executable from C++: ") + logW(Py_GetProgramFullPath()));
+    LOG_INFO(std::string("Python home: ") + logW(Py_GetPythonHome()));
+    LOG_INFO(std::string("Python paths: ") + logW(Py_GetPath()));
+
+#ifdef ADAPTER_DEVELOPMENT
+    {
+        // Make the source tree importable so `python.Adapter` can be reloaded from disk.
+        auto devDir = ensureWideChar(getProgramDirectory());
+        PyObject* sysPath = PySys_GetObject("path"); // borrowed
+        if (sysPath)
+        {
+            PyObjectGuard devEntry(PyUnicode_FromWideChar(devDir.c_str(), -1));
+            if (devEntry)
+            {
+                PyList_Insert(sysPath, 0, devEntry.get());
+            }
+        }
+    }
+#endif
 
     libpythonWorkaround();
 
@@ -490,6 +451,16 @@ void EmbeddedPython::execute(char *output, int outputSize, const char *input)
     PyObject* PyFunction = PyList_GetItem(pArgs.get(), 0); // Borrows reference
     if (PyFunction)
     {
+        // Re-discover Arma mods at runtime and re-register their Python sources.
+        // Intercepted here (like pythia.multipart) because discovery lives in C++.
+        if (PyUnicode_CompareWithASCIIString(PyFunction, "pythia.rescan") == 0)
+        {
+            auto sources = getPythiaModulesSources();
+            initModules(sources);
+            snprintf(output, outputSize, "[\"r\",%lu]", (unsigned long)sources.size());
+            return;
+        }
+
         // Multipart
         // TODO: Do a Python string comparison
         if (PyUnicode_CompareWithASCIIString(PyFunction, "pythia.multipart") == 0)

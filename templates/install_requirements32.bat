@@ -12,14 +12,17 @@ set requirements_file=%1
 IF %1==nopause set requirements_file=%2
 IF %requirements_file%.==. GOTO END_MISSING_ARGUMENT
 
-set interpreter=%~dp0\python-{version}-embed-win32
+rem Pythia uses the system Python. Prefer the exact 32-bit version via the py
+rem launcher, falling back to whatever "python" is on PATH.
+set PYCMD=py -{version_dotted}-32
+%PYCMD% -c "import sys" >nul 2>nul || set PYCMD=python
 
 echo ===============================================================================
-echo Installing requirements for %interpreter% from %requirements_file%...
+echo Installing requirements using "%PYCMD%" from %requirements_file%...
 echo ===============================================================================
 
 echo.
-"%interpreter%\python.exe" -I -m pip install  --upgrade --no-warn-script-location -r %requirements_file%
+%PYCMD% -m pip install  --upgrade --no-warn-script-location -r %requirements_file%
 if ERRORLEVEL 1 GOTO END_PIP_ERROR
 echo.
 

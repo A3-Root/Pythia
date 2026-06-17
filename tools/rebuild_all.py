@@ -1,6 +1,5 @@
 # /// script
 # dependencies = [
-#   "auditwheel < 5",
 #   "packaging",
 #   "pefile",
 #   "pyelftools",  # elftools

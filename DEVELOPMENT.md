@@ -66,6 +66,9 @@ Linux/WSL requirements
 
 Run these commands to install the packages required to build on linux or in WSL.
 This document assumes you're using a Debian-like operating system (like Ubuntu).
+Docker is no longer required — the Linux `.so` is built natively and links the
+system `libpython`. Replace `<minor>` with the target Python minor version
+(e.g. `3.12`).
 
     sudo apt update
-    sudo apt install -y build_esential g++-9-multilib cmake ninja-build
+    sudo apt install -y build-essential cmake ninja-build python3.<minor>-dev

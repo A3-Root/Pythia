@@ -14,16 +14,26 @@ tstring pythonPath = LITERAL("<Not set>");
 void setDLLPath()
 {
     LOG_INFO("Setting DLL path");
-    pythonPath = getPythonPath();
 
     #ifdef _WIN32
+    // Point the loader at the system Python install so pythonXY.dll resolves
+    // when Pythia.dll loads afterwards.
+    pythonPath = getPythonDirectory();
+    if (pythonPath.empty())
+    {
+        LOG_ERROR("Could not locate a system Python install. Ensure Python " PYTHON_VERSION_DOTTED " is installed.");
+        return;
+    }
+
     LOG_INFO(std::string("Setting DLL path to: ") + Logger::w2s(pythonPath));
     if (SetDllDirectory(pythonPath.c_str()) == 0)
     {
         LOG_ERROR("Failed to call SetDllDirectory");
     }
     #else
-    LOG_INFO("Not changing any paths. On linux, this is handled using rpath in Pythia.so");
+    // On Linux the dynamic loader finds the system libpython directly; nothing to do here.
+    pythonPath = discoverPythonExecutable();
+    LOG_INFO("Not changing any paths. On linux, libpython is resolved by the dynamic loader");
     #endif
 }
 

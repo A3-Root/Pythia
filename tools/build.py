@@ -1,6 +1,5 @@
 # /// script
 # dependencies = [
-#   "auditwheel < 5",
 #   "packaging",
 #   "pefile",
 #   "pyelftools",  # elftools
@@ -62,23 +61,9 @@ def clear_pythia_directory():
 
 
 def create_interpreters(version, dest):
-    version = packaging.version.Version(version)
-    print(f'Creating Python {version} interpreters in "{dest}" directory...', flush=True)
-    _run([sys.executable, os.path.join('tools', 'create_embedded_python.py'), '--version', str(version), dest], check=True)
-
-
-def _get_embed(version, system, arch):
-    embed = {
-        'linux': {
-            'x64': os.path.join('@Pythia', f'python-{version.major}{version.minor}-embed-linux64', 'bin', 'python3'),
-        },
-        'windows': {
-            'x86': os.path.join('@Pythia', f'python-{version.major}{version.minor}-embed-win32', 'python.exe'),
-            'x64': os.path.join('@Pythia', f'python-{version.major}{version.minor}-embed-amd64', 'python.exe'),
-        }
-    }
-
-    return embed[system][arch]
+    # Pythia no longer bundles a CPython interpreter; it loads the system Python
+    # at runtime. This subcommand is kept as a no-op for backwards compatibility.
+    print('create_interpreters is a no-op: Pythia uses the system Python.', flush=True)
 
 
 def build_binaries(version, arch, system, run_tests=True):
@@ -98,27 +83,21 @@ def build_binaries(version, arch, system, run_tests=True):
         shutil.rmtree('ninja')
     os.makedirs('ninja')
 
-    if system == 'linux':
-        _verbose_run(['docker', 'build', '-f', f'Dockerfile.{arch}', '-t', 'pythia:latest', '.'], check=True)
-        # Workaround for GitHub Actions
-        # This is to fix GIT not liking owner of the checkout dir (git callback in cmake)
-        # https://github.com/actions/runner/issues/2033
-        uid_gid = ['-u', f'{os.getuid()}:{os.getgid()}'] if sys.platform == 'linux' else []
-        docker_prefix = ['docker', 'run'] + uid_gid + ['--rm', '-v', f'{os.getcwd()}/:/data', '-w', '/data/ninja', 'pythia:latest']
-        shell = False
-    else:
-        docker_prefix = []
-        shell = True
-
-    _verbose_run(docker_prefix + ['cmake', '-G', 'Ninja', f'-DUSE_64BIT_BUILD={"ON" if arch == "x64" else "OFF"}', '-DCMAKE_BUILD_TYPE=RelWithDebInfo', '..'], check=True, cwd='ninja', env=env, shell=shell)
-    _verbose_run(docker_prefix + ['ninja'], check=True, cwd='ninja', env=env, shell=shell)
+    # Native build on both platforms. CMake locates the system Python via
+    # find_package(Python3 ... Development); the resulting binary links against
+    # whatever Python dev package is installed on the build machine.
+    shell = system != 'linux'
+    _verbose_run(['cmake', '-G', 'Ninja', f'-DUSE_64BIT_BUILD={"ON" if arch == "x64" else "OFF"}', '-DCMAKE_BUILD_TYPE=RelWithDebInfo', '..'], check=True, cwd='ninja', env=env, shell=shell)
+    _verbose_run(['ninja'], check=True, cwd='ninja', env=env, shell=shell)
 
 
 def run_tests(version, arch, system):
     version = packaging.version.Version(version)
     print(f'Running tests for {arch} {system}...', flush=True)
 
-    _verbose_run([_get_embed(version, system, arch), os.path.join('tests', 'tests.py')], check=True)
+    # The test harness only orchestrates PythiaTester (which embeds Python), so
+    # any interpreter works here. Use the one running this script.
+    _verbose_run([sys.executable, os.path.join('tests', 'tests.py')], check=True)
 
 
 def build_pbos():
@@ -135,6 +114,7 @@ def copy_templates(version):
             with open(os.path.join('@Pythia', f), 'wb') as fwrite:
                 data = fread.read()
                 data = data.replace(b'{version}', f'{version.major}{version.minor}'.encode('ascii'))
+                data = data.replace(b'{version_dotted}', f'{version.major}.{version.minor}'.encode('ascii'))
                 # https://stackoverflow.com/a/15919878/6543759
                 kind = (1 << 62)  # UTC
                 ticks = int((datetime.utcnow() - datetime(1, 1, 1)).total_seconds() * (10 ** 7))

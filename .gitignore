@@ -24,8 +24,13 @@ bin
 *.exe
 *.dll
 build
+build_x64
+build_x86
 ninja
 ninja64
 vcproj
 vcproj64
 tests/python
+*.md
+!USAGE.md
+*.txt

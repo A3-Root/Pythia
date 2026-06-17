@@ -8,13 +8,15 @@
 # file onto install_requirements64.sh
 #############################################################################
 
-interpreter=`dirname "$0"`/python-{version}-embed-linux64
+# Pythia uses the system Python. Prefer the exact version, falling back to python3.
+interpreter=python{version_dotted}
+command -v "$interpreter" >/dev/null 2>&1 || interpreter=python3
 
 echo ===============================================================================
-echo Installing requirements for $interpreter from "$1"...
+echo Installing requirements using "$interpreter" from "$1"...
 echo ===============================================================================
 
-"${interpreter}"/bin/python3 -I -m pip install  --upgrade --no-warn-script-location -r "$1"
+"${interpreter}" -m pip install  --upgrade --no-warn-script-location -r "$1"
 
 if [ $? -ne 0 ]; then
     echo !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!

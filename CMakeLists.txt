@@ -31,16 +31,13 @@ if(CMAKE_COMPILER_IS_GNUCXX)
     message(STATUS "Setting GCC flags (64bit)")
     set(CMAKE_LIBRARY_ARCHITECTURE x86_64-linux-gnu)
     set(CMAKE_CXX_FLAGS "-O3 -s -fPIC -pthread")
-    set(CMAKE_PREFIX_PATH "@Pythia/python-${PYTHON_VERSION_MAJOR}${PYTHON_VERSION_MINOR}-embed-linux64")
 
 else() # MSVC
     if(CMAKE_SIZEOF_VOID_P LESS 8)
         set(USE_64BIT_BUILD OFF)
         message(STATUS "Setting MSVC flags (32bit)")
-        set(CMAKE_PREFIX_PATH "@Pythia/python-${PYTHON_VERSION_MAJOR}${PYTHON_VERSION_MINOR}-embed-win32")
     else()
         message(STATUS "Setting MSVC flags (64bit)")
-        set(CMAKE_PREFIX_PATH "@Pythia/python-${PYTHON_VERSION_MAJOR}${PYTHON_VERSION_MINOR}-embed-amd64")
     endif()
 
     message(STATUS "Setting MSVC flags")
